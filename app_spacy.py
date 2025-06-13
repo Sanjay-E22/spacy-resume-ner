@@ -1,49 +1,88 @@
-import streamlit as st
 import spacy
-import os
+import streamlit as st
 from spacy.training.example import Example
+import os
+import json
+import random
 
-TRAIN_DATA = [
-    ("John Doe is a Senior Data Scientist at TCS skilled in Python and Machine Learning.",
-     {"entities": [(0, 8, "NAME"), (15, 35, "JOB_TITLE"), (39, 42, "ORG"), (60, 66, "SKILL"), (71, 89, "SKILL")]}),
-    ("Jane Smith graduated from IIT Delhi and works as a Backend Developer at Amazon.",
-     {"entities": [(0, 10, "NAME"), (25, 34, "EDUCATION"), (51, 68, "JOB_TITLE"), (72, 78, "ORG")]}),
-    ("Contact: rahul@gmail.com, Phone: 9876543210",
-     {"entities": [(9, 26, "EMAIL"), (35, 45, "PHONE")]}),
-]
+st.set_page_config(page_title="📄 Resume NER App", layout="wide")
+st.title("📄 Resume NER with spaCy (Auto-Trained)")
+st.write("Paste resume text below to extract entities like name, job title, skills, etc.")
 
-MODEL_PATH = "custom_ner_model_spacy"
+MODEL_DIR = "custom_ner_model_spacy"
+TRAIN_FILE = "spacy_resume_train_data_50.json"
 
-@st.cache_resource
-def load_or_train_model():
-    if os.path.exists(MODEL_PATH):
-        return spacy.load(MODEL_PATH)
+# =====================
+# 🔁 Auto-train model
+# =====================
+if not os.path.exists(MODEL_DIR):
+    st.info("🔧 Training spaCy model for the first time...")
 
+    # Load training data
+    with open(TRAIN_FILE) as f:
+        TRAIN_DATA = json.load(f)
+
+    # Create blank English NLP model
     nlp = spacy.blank("en")
-    ner = nlp.add_pipe("ner")
 
+    # Add NER pipe
+    if "ner" not in nlp.pipe_names:
+        ner = nlp.add_pipe("ner")
+    else:
+        ner = nlp.get_pipe("ner")
+
+    # Add entity labels
     for _, annotations in TRAIN_DATA:
-        for ent in annotations["entities"]:
+        for ent in annotations.get("entities"):
             ner.add_label(ent[2])
 
-    nlp.begin_training()
-    for i in range(20):
-        losses = {}
-        for text, annotations in TRAIN_DATA:
-            example = Example.from_dict(nlp.make_doc(text), annotations)
-            nlp.update([example], losses=losses)
-    nlp.to_disk(MODEL_PATH)
-    return nlp
+    # Train
+    other_pipes = [pipe for pipe in nlp.pipe_names if pipe != "ner"]
+    with nlp.disable_pipes(*other_pipes):
+        optimizer = nlp.begin_training()
+        for i in range(30):
+            random.shuffle(TRAIN_DATA)
+            losses = {}
+            for text, annotations in TRAIN_DATA:
+                doc = nlp.make_doc(text)
+                example = Example.from_dict(doc, annotations)
+                nlp.update([example], drop=0.3, losses=losses)
+            print(f"Iteration {i+1}, Losses: {losses}")
 
-st.title("ðŸ“„ Resume Parser App - spaCy NER")
-st.write("Paste resume/job text below:")
+    # Save model
+    nlp.to_disk(MODEL_DIR)
+    st.success(f"✅ Model trained and saved at: {MODEL_DIR}")
 
-nlp = load_or_train_model()
+# =====================
+# 🚀 Load model
+# =====================
+nlp = spacy.load(MODEL_DIR)
 
-text = st.text_area("Enter text here")
+# =====================
+# 📥 Text input
+# =====================
+text_input = st.text_area("Paste resume text here 👇", height=250)
 
-if st.button("Extract Entities"):
-    doc = nlp(text)
-    st.subheader("Extracted Entities")
-    for ent in doc.ents:
-        st.markdown(f"**{ent.label_}**: {ent.text}")
+# =====================
+# 🎯 Entity Extraction
+# =====================
+if st.button("🔍 Extract Entities"):
+    if text_input:
+        doc = nlp(text_input)
+        st.subheader("🔎 Recognized Entities")
+
+        # Custom colors for each label
+        colors = {
+            "NAME": "#FFD700",         # gold
+            "JOB_TITLE": "#00BFFF",    # deep sky blue
+            "ORG": "#32CD32",          # lime green
+            "EMAIL": "#FF69B4",        # pink
+            "PHONE": "#FFA07A",        # light salmon
+            "SKILL": "#00CED1",        # dark turquoise
+            "EDUCATION": "#BA55D3",    # medium orchid
+        }
+        options = {"ents": list(colors.keys()), "colors": colors}
+        html = spacy.displacy.render(doc, style="ent", options=options, page=True)
+        st.write(html, unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ Please paste some resume text first.")
