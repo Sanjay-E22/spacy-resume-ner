@@ -40,7 +40,7 @@ if not os.path.exists(MODEL_DIR):
     other_pipes = [pipe for pipe in nlp.pipe_names if pipe != "ner"]
     with nlp.disable_pipes(*other_pipes):
         optimizer = nlp.begin_training()
-        for i in range(30):
+        for i in range(60):
             random.shuffle(TRAIN_DATA)
             losses = {}
             for text, annotations in TRAIN_DATA:
